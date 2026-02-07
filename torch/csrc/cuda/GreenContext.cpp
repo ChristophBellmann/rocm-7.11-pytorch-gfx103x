@@ -1,4 +1,4 @@
-#include <ATen/cuda/CUDAGreenContext.h>
+#include <ATen/hip/HIPGreenContext.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/utils/pybind.h>
 
@@ -12,7 +12,7 @@ void THCPGreenContext_init(PyObject* module) {
       .def("pop_context", &::at::cuda::GreenContext::popContext)
       .def("Stream", [](at::cuda::GreenContext& self) {
         auto s = self.Stream();
-        cudaStream_t raw = self.Stream();
+        hipStream_t raw = self.Stream();
         auto ptr_val = reinterpret_cast<uintptr_t>(raw);
 
         py::object torch_cuda = py::module::import("torch.cuda");

@@ -7,9 +7,9 @@
 #include <torch/csrc/distributed/c10d/symm_mem/nvshmem_team_manager.hpp>
 
 #include <ATen/ceil_div.h>
-#include <ATen/cuda/CUDAContext.h>
-#include <c10/cuda/CUDACachingAllocator.h>
-#include <c10/cuda/CUDAGuard.h>
+#include <ATen/hip/HIPContext.h>
+#include <c10/hip/HIPCachingAllocator.h>
+#include <c10/hip/HIPGuard.h>
 #include <c10/util/error.h>
 
 // Starting from NVSHMEM 3.3.9, nvshmem_host.h exists so that we can cleanly
@@ -96,11 +96,11 @@ class NVSHMEMPeerAllocInfo : public c10::intrusive_ptr_target {
       // Emplace a device array of rank to global rank mapping
       auto rank_to_global_rank_dev = reinterpret_cast<int*>(
           c10::cuda::CUDACachingAllocator::raw_alloc(sizeof(int) * world_size_));
-      AT_CUDA_CHECK(cudaMemcpy(
+      AT_CUDA_CHECK(hipMemcpy(
           rank_to_global_rank_dev,
           rank_to_global_rank.data(),
           sizeof(int) * world_size_,
-          cudaMemcpyHostToDevice));
+          hipMemcpyHostToDevice));
       rank_to_global_rank_dev_map[group_name] = rank_to_global_rank_dev;
     }
     auto& rank_to_global_rank = it->second;
@@ -119,7 +119,7 @@ class NVSHMEMPeerAllocInfo : public c10::intrusive_ptr_target {
     const size_t signal_pad_size = get_signal_pad_size();
     void* signal_pad_ptr = nvshmem_malloc(signal_pad_size);
     TORCH_CHECK(signal_pad_ptr != nullptr, "nvshmem_malloc failed");
-    AT_CUDA_CHECK(cudaMemset(signal_pad_ptr, 0, signal_pad_size));
+    AT_CUDA_CHECK(hipMemset(signal_pad_ptr, 0, signal_pad_size));
 
     for (int r = 0; r < world_size_; ++r) {
       signal_pads_.push_back(
@@ -132,13 +132,13 @@ class NVSHMEMPeerAllocInfo : public c10::intrusive_ptr_target {
     signal_pads_dev_ = reinterpret_cast<void**>(
         c10::cuda::CUDACachingAllocator::raw_alloc(arr_size));
 
-    AT_CUDA_CHECK(cudaMemcpy(
-        buffers_dev_, buffers_.data(), arr_size, cudaMemcpyHostToDevice));
-    AT_CUDA_CHECK(cudaMemcpy(
+    AT_CUDA_CHECK(hipMemcpy(
+        buffers_dev_, buffers_.data(), arr_size, hipMemcpyHostToDevice));
+    AT_CUDA_CHECK(hipMemcpy(
         signal_pads_dev_,
         signal_pads_.data(),
         arr_size,
-        cudaMemcpyHostToDevice));
+        hipMemcpyHostToDevice));
 
     // Initialize multicast address
     // On unsupported platforms, this API returns a nullptr.
@@ -318,7 +318,7 @@ static void initialize_nvshmem_with_store(
   c10::cuda::CUDAGuard guard(device_idx);
   maybe_initialize_env_vars();
   // Make sure the CUDA runtime is initialized.
-  cudaFree(nullptr);
+  hipFree(nullptr);
 
   nvshmemx_uniqueid_t unique_id;
   NVSHMEM_CHECK(

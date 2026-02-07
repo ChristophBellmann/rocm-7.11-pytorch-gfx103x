@@ -1,7 +1,7 @@
 #pragma once
 
-#include <c10/cuda/CUDAException.h>
-#include <c10/cuda/CUDAGuard.h>
+#include <c10/hip/HIPException.h>
+#include <c10/hip/HIPGuard.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/distributed/c10d/symm_mem/nccl_dev_cap.hpp>
 #include <string>
@@ -94,7 +94,7 @@ class NCCLDevCommManager {
       c10::cuda::CUDAGuard guard(device_);
       // Make sure all kernels have completed before destroying the device
       // communicator.
-      C10_CUDA_CHECK(cudaDeviceSynchronize());
+      C10_CUDA_CHECK(hipDeviceSynchronize());
       for (auto& [_, comm_pair] : group_to_comms_) {
         auto& [comm, devcomm] = comm_pair;
         ncclDevCommDestroy(comm, &devcomm);

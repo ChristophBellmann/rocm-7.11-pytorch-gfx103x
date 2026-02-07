@@ -1,8 +1,9 @@
+#include "hip/hip_runtime.h"
 #include <torch/csrc/distributed/c10d/symm_mem/nccl_dev_cap.hpp>
 
 #ifdef NCCL_HAS_SYMMEM_SUPPORT
 
-#include <vector_types.h>
+#include <hip/hip_vector_types.h>
 #include <torch/csrc/distributed/c10d/GroupRegistry.hpp>
 #include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
@@ -14,9 +15,9 @@
 #include <torch/csrc/distributed/c10d/symm_mem/nccl_devcomm_manager.hpp>
 
 #include <ATen/ceil_div.h>
-#include <ATen/cuda/CUDAContext.h>
-#include <c10/cuda/CUDACachingAllocator.h>
-#include <c10/cuda/CUDAGuard.h>
+#include <ATen/hip/HIPContext.h>
+#include <c10/hip/HIPCachingAllocator.h>
+#include <c10/hip/HIPGuard.h>
 #include <c10/util/error.h>
 
 namespace c10d {
@@ -122,23 +123,23 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
     buffers_.resize(world_size_);
     signal_pads_.resize(world_size_);
 
-    int threads = std::min(128, world_size_);
+    int threads = ::min(128, world_size_);
     auto stream = at::cuda::getCurrentCUDAStream();
     build_ptr_dev<<<1, threads, 0, stream>>>(buffer_win_, 0, buffers_dev_, world_size_);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
     build_ptr_dev<<<1, threads, 0, stream>>>(signal_handle_, 0, signal_pads_dev_, world_size_);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
-    C10_CUDA_CHECK(cudaStreamSynchronize(stream));
-    C10_CUDA_CHECK(cudaMemcpy(
+    C10_CUDA_CHECK(hipStreamSynchronize(stream));
+    C10_CUDA_CHECK(hipMemcpy(
       buffers_.data(),  // dst (host)
       buffers_dev_,  // src (device)
       arr_size,
-      cudaMemcpyDeviceToHost));
-    C10_CUDA_CHECK(cudaMemcpy(
+      hipMemcpyDeviceToHost));
+    C10_CUDA_CHECK(hipMemcpy(
       signal_pads_.data(),  // dst (host)
       signal_pads_dev_,  // src (device)
       arr_size,
-      cudaMemcpyDeviceToHost));
+      hipMemcpyDeviceToHost));
 #endif
 
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2, 29, 0)

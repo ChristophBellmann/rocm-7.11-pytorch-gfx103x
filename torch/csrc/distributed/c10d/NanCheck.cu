@@ -1,8 +1,9 @@
+#include "hip/hip_runtime.h"
 #ifdef USE_C10D_NCCL
 
 #include <ATen/Dispatch.h>
-#include <ATen/cuda/CUDAContext.h>
-#include <c10/cuda/CUDAGuard.h>
+#include <ATen/hip/HIPContext.h>
+#include <c10/hip/HIPGuard.h>
 #include <torch/torch.h>
 #include <algorithm>
 #include <torch/csrc/distributed/c10d/NanCheck.hpp>
