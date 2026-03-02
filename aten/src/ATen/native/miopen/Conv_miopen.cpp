@@ -398,6 +398,116 @@ size_t getSolutionWorkspaceSize<miopenConvBwdWeightsAlgorithm_t>(
   return st == miopenStatusSuccess ? ws : fallback_workspace_size;
 }
 
+template <typename algo_t>
+size_t getMaxSolutionWorkspaceSize(const ConvolutionArgs&, size_t fallback_workspace_size) {
+  return fallback_workspace_size;
+}
+
+template <>
+size_t getMaxSolutionWorkspaceSize<miopenConvFwdAlgorithm_t>(
+    const ConvolutionArgs& args,
+    size_t fallback_workspace_size) {
+  size_t max_solution_count = 0;
+  size_t solution_count = 0;
+  miopenConvSolution_t solutions[AT_MIOPEN_MAX_SOLUTIONS];
+  MIOPEN_CHECK(miopenConvolutionForwardGetSolutionCount(
+      args.handle,
+      args.wdesc.desc(),
+      args.idesc.desc(),
+      args.cdesc.desc(),
+      args.odesc.desc(),
+      &max_solution_count));
+  if (max_solution_count > AT_MIOPEN_MAX_SOLUTIONS) {
+    max_solution_count = AT_MIOPEN_MAX_SOLUTIONS;
+  }
+  MIOPEN_CHECK(miopenConvolutionForwardGetSolution(
+      args.handle,
+      args.wdesc.desc(),
+      args.idesc.desc(),
+      args.cdesc.desc(),
+      args.odesc.desc(),
+      max_solution_count,
+      &solution_count,
+      solutions));
+  size_t max_ws = fallback_workspace_size;
+  for (size_t i = 0; i < solution_count; ++i) {
+    const auto ws = getSolutionWorkspaceSize<miopenConvFwdAlgorithm_t>(
+        args, solutions[i].solution_id, solutions[i].workspace_size);
+    max_ws = std::max(max_ws, ws);
+  }
+  return max_ws;
+}
+
+template <>
+size_t getMaxSolutionWorkspaceSize<miopenConvBwdDataAlgorithm_t>(
+    const ConvolutionArgs& args,
+    size_t fallback_workspace_size) {
+  size_t max_solution_count = 0;
+  size_t solution_count = 0;
+  miopenConvSolution_t solutions[AT_MIOPEN_MAX_SOLUTIONS];
+  MIOPEN_CHECK(miopenConvolutionBackwardDataGetSolutionCount(
+      args.handle,
+      args.odesc.desc(),
+      args.wdesc.desc(),
+      args.cdesc.desc(),
+      args.idesc.desc(),
+      &max_solution_count));
+  if (max_solution_count > AT_MIOPEN_MAX_SOLUTIONS) {
+    max_solution_count = AT_MIOPEN_MAX_SOLUTIONS;
+  }
+  MIOPEN_CHECK(miopenConvolutionBackwardDataGetSolution(
+      args.handle,
+      args.odesc.desc(),
+      args.wdesc.desc(),
+      args.cdesc.desc(),
+      args.idesc.desc(),
+      max_solution_count,
+      &solution_count,
+      solutions));
+  size_t max_ws = fallback_workspace_size;
+  for (size_t i = 0; i < solution_count; ++i) {
+    const auto ws = getSolutionWorkspaceSize<miopenConvBwdDataAlgorithm_t>(
+        args, solutions[i].solution_id, solutions[i].workspace_size);
+    max_ws = std::max(max_ws, ws);
+  }
+  return max_ws;
+}
+
+template <>
+size_t getMaxSolutionWorkspaceSize<miopenConvBwdWeightsAlgorithm_t>(
+    const ConvolutionArgs& args,
+    size_t fallback_workspace_size) {
+  size_t max_solution_count = 0;
+  size_t solution_count = 0;
+  miopenConvSolution_t solutions[AT_MIOPEN_MAX_SOLUTIONS];
+  MIOPEN_CHECK(miopenConvolutionBackwardWeightsGetSolutionCount(
+      args.handle,
+      args.odesc.desc(),
+      args.idesc.desc(),
+      args.cdesc.desc(),
+      args.wdesc.desc(),
+      &max_solution_count));
+  if (max_solution_count > AT_MIOPEN_MAX_SOLUTIONS) {
+    max_solution_count = AT_MIOPEN_MAX_SOLUTIONS;
+  }
+  MIOPEN_CHECK(miopenConvolutionBackwardWeightsGetSolution(
+      args.handle,
+      args.odesc.desc(),
+      args.idesc.desc(),
+      args.cdesc.desc(),
+      args.wdesc.desc(),
+      max_solution_count,
+      &solution_count,
+      solutions));
+  size_t max_ws = fallback_workspace_size;
+  for (size_t i = 0; i < solution_count; ++i) {
+    const auto ws = getSolutionWorkspaceSize<miopenConvBwdWeightsAlgorithm_t>(
+        args, solutions[i].solution_id, solutions[i].workspace_size);
+    max_ws = std::max(max_ws, ws);
+  }
+  return max_ws;
+}
+
 template<typename perf_t>
 perf_t getBestAlgorithm(perf_t *perfResults, bool deterministic, int n_algo) {
   return perfResults[0];
@@ -415,7 +525,8 @@ struct algorithm_search<miopenConvFwdAlgorithm_t> {
   static perf_t findAlgorithm(const ConvolutionArgs& args, bool benchmark) {
     int perf_count;
     perf_t perf_results;
-    size_t max_ws_size = getWorkspaceSize(args, DEFAULT_ALGO);
+    size_t max_ws_size = getMaxSolutionWorkspaceSize<miopenConvFwdAlgorithm_t>(
+        args, getWorkspaceSize(args, DEFAULT_ALGO));
     Workspace ws(max_ws_size);
     MIOPEN_CHECK(miopenFindConvolutionForwardAlgorithm(
         args.handle,
@@ -488,7 +599,8 @@ struct algorithm_search<miopenConvBwdDataAlgorithm_t> {
   static perf_t findAlgorithm(const ConvolutionArgs& args, bool benchmark) {
     int perf_count;
     perf_t perf_results;
-    size_t max_ws_size = getWorkspaceSize(args, DEFAULT_ALGO);
+    size_t max_ws_size = getMaxSolutionWorkspaceSize<miopenConvBwdDataAlgorithm_t>(
+        args, getWorkspaceSize(args, DEFAULT_ALGO));
     Workspace ws(max_ws_size);
     MIOPEN_CHECK(miopenFindConvolutionBackwardDataAlgorithm(
         args.handle,
@@ -561,7 +673,8 @@ struct algorithm_search<miopenConvBwdWeightsAlgorithm_t> {
   static perf_t findAlgorithm(const ConvolutionArgs& args, bool benchmark) {
     int perf_count;
     perf_t perf_results;
-    size_t max_ws_size = getWorkspaceSize(args, DEFAULT_ALGO);
+    size_t max_ws_size = getMaxSolutionWorkspaceSize<miopenConvBwdWeightsAlgorithm_t>(
+        args, getWorkspaceSize(args, DEFAULT_ALGO));
     Workspace ws(max_ws_size);
     MIOPEN_CHECK(miopenFindConvolutionBackwardWeightsAlgorithm(
         args.handle,
