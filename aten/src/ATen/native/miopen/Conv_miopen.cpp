@@ -338,6 +338,66 @@ size_t getWorkspaceSize(
     return sz;
 }
 
+template <typename algo_t>
+size_t getSolutionWorkspaceSize(
+    const ConvolutionArgs&,
+    uint64_t,
+    size_t fallback_workspace_size) {
+  return fallback_workspace_size;
+}
+
+template <>
+size_t getSolutionWorkspaceSize<miopenConvFwdAlgorithm_t>(
+    const ConvolutionArgs& args,
+    uint64_t solution_id,
+    size_t fallback_workspace_size) {
+  size_t ws = 0;
+  const miopenStatus_t st = miopenConvolutionForwardGetSolutionWorkspaceSize(
+      args.handle,
+      args.wdesc.desc(),
+      args.idesc.desc(),
+      args.cdesc.desc(),
+      args.odesc.desc(),
+      solution_id,
+      &ws);
+  return st == miopenStatusSuccess ? ws : fallback_workspace_size;
+}
+
+template <>
+size_t getSolutionWorkspaceSize<miopenConvBwdDataAlgorithm_t>(
+    const ConvolutionArgs& args,
+    uint64_t solution_id,
+    size_t fallback_workspace_size) {
+  size_t ws = 0;
+  const miopenStatus_t st = miopenConvolutionBackwardDataGetSolutionWorkspaceSize(
+      args.handle,
+      args.odesc.desc(),
+      args.wdesc.desc(),
+      args.cdesc.desc(),
+      args.idesc.desc(),
+      solution_id,
+      &ws);
+  return st == miopenStatusSuccess ? ws : fallback_workspace_size;
+}
+
+template <>
+size_t getSolutionWorkspaceSize<miopenConvBwdWeightsAlgorithm_t>(
+    const ConvolutionArgs& args,
+    uint64_t solution_id,
+    size_t fallback_workspace_size) {
+  size_t ws = 0;
+  const miopenStatus_t st =
+      miopenConvolutionBackwardWeightsGetSolutionWorkspaceSize(
+          args.handle,
+          args.odesc.desc(),
+          args.idesc.desc(),
+          args.cdesc.desc(),
+          args.wdesc.desc(),
+          solution_id,
+          &ws);
+  return st == miopenStatusSuccess ? ws : fallback_workspace_size;
+}
+
 template<typename perf_t>
 perf_t getBestAlgorithm(perf_t *perfResults, bool deterministic, int n_algo) {
   return perfResults[0];
@@ -626,14 +686,18 @@ Workspace chooseSolution(const ConvolutionArgs& args, uint64_t* solution_id)
   miopenConvSolution_t solution = search::getSolution(args, false);
   try {
     *solution_id = solution.solution_id;
-    return Workspace(solution.workspace_size);
+    const size_t workspace_size =
+        getSolutionWorkspaceSize<algo_t>(args, *solution_id, solution.workspace_size);
+    return Workspace(workspace_size);
   } catch (const std::exception&) {
     std::ignore = hipGetLastError(); // clear OOM error
 
     // switch to default algorithm
     solution = search::getSolution(args, true);
     *solution_id = solution.solution_id;
-    return Workspace(solution.workspace_size);
+    const size_t workspace_size =
+        getSolutionWorkspaceSize<algo_t>(args, *solution_id, solution.workspace_size);
+    return Workspace(workspace_size);
   }
 }
 
