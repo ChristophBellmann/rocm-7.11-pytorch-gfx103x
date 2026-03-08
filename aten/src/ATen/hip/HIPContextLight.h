@@ -12,7 +12,11 @@
 
 // cublasLT was introduced in CUDA 10.1 but we enable only for 11.1 that also
 // added bf16 support
+#if defined(USE_ROCM) && !defined(USE_ROCM_HIPBLASLT)
+using hipblasLtHandle_t = hipblasHandle_t;
+#else
 #include <hipblaslt/hipblaslt.h>
+#endif
 
 #ifdef CUDART_VERSION
 #include <cusolverDn.h>

@@ -34,8 +34,10 @@
 #endif
 #define ROCBLAS_BETA_FEATURES_API
 #include <rocblas/rocblas.h>
+#ifdef USE_ROCM_HIPBLASLT
 #include <hipblaslt/hipblaslt.h>
 #include <hipblaslt/hipblaslt-ext.hpp>
+#endif
 #endif
 
 namespace at::cuda::tunable {
@@ -341,6 +343,7 @@ TuningResultsValidator::TuningResultsValidator() {
           return rocblas_version == k ? OK : FAIL;
         });
   }
+#ifdef USE_ROCM_HIPBLASLT
   // hipblaslt
   {
     int version;
@@ -358,6 +361,7 @@ TuningResultsValidator::TuningResultsValidator() {
           return hipblaslt_version == k ? OK : FAIL;
         });
   }
+#endif
 #endif
 }
 

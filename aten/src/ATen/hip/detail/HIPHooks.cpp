@@ -31,7 +31,9 @@
 
 #if defined(USE_ROCM)
 #include <miopen/version.h>
+#if defined(USE_ROCM_HIPBLASLT)
 #include <hipblaslt/hipblaslt-version.h>
+#endif
 #endif
 
 #ifndef USE_ROCM
@@ -175,7 +177,7 @@ bool CUDAHooks::hasCuSOLVER() const {
 bool CUDAHooks::hasCuBLASLt() const {
 #if defined(CUDART_VERSION)
   return true;
-#elif AT_ROCM_ENABLED()
+#elif AT_ROCM_ENABLED() && defined(USE_ROCM_HIPBLASLT)
   return true;
 #else
   return false;
@@ -384,12 +386,12 @@ long CUDAHooks::versionMIOpen() const {
 }
 
 long CUDAHooks::versionHipBLASLt() const {
-#if AT_ROCM_ENABLED()
+#if AT_ROCM_ENABLED() && defined(USE_ROCM_HIPBLASLT)
   return HIPBLASLT_VERSION_MAJOR * 10000 +
          HIPBLASLT_VERSION_MINOR * 100 +
          HIPBLASLT_VERSION_PATCH;
 #else
-  TORCH_CHECK(false, "Cannot query HipBLASLt version if ATen_cuda is not built with ROCm");
+  return 0;
 #endif
 }
 
@@ -553,6 +555,10 @@ bool CUDAHooks::isGPUArch(const std::vector<std::string>& archs, DeviceIndex dev
 }
 
 const std::vector<std::string>& CUDAHooks::getHipblasltPreferredArchs() const {
+#if !defined(USE_ROCM_HIPBLASLT)
+  static const std::vector<std::string> archs = {};
+  return archs;
+#else
   static const std::vector<std::string> archs = {
     "gfx90a", "gfx942",
 #if ROCM_VERSION >= 60400
@@ -563,9 +569,14 @@ const std::vector<std::string>& CUDAHooks::getHipblasltPreferredArchs() const {
 #endif
   };
   return archs;
+#endif
 }
 
 const std::vector<std::string>& CUDAHooks::getHipblasltSupportedArchs() const {
+#if !defined(USE_ROCM_HIPBLASLT)
+  static const std::vector<std::string> archs = {};
+  return archs;
+#else
   static const std::vector<std::string> archs = {
     "gfx90a", "gfx942",
 #if ROCM_VERSION >= 60300
@@ -579,6 +590,7 @@ const std::vector<std::string>& CUDAHooks::getHipblasltSupportedArchs() const {
 #endif
   };
   return archs;
+#endif
 }
 #endif
 

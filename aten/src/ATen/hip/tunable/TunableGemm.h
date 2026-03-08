@@ -11,8 +11,10 @@
 #pragma once
 
 #include <ATen/hip/tunable/GemmCommon.h>
-#ifdef USE_ROCM
+#if defined(USE_ROCM) && defined(USE_ROCM_HIPBLASLT)
 #include <ATen/hip/tunable/GemmHipblaslt.h>
+#endif
+#ifdef USE_ROCM
 #include <ATen/hip/tunable/GemmRocblas.h>
 #endif
 #include <ATen/hip/tunable/TunableOp.h>
@@ -219,6 +221,7 @@ class GemmTunableOp : public TunableOp<GemmParams<T>> {
       }
     }
 
+#ifdef USE_ROCM_HIPBLASLT
     static const auto env_hipblaslt = c10::utils::check_env("PYTORCH_TUNABLEOP_HIPBLASLT_ENABLED");
     if (!env_hipblaslt.has_value() || env_hipblaslt.value()) {
       // disallow tuning of hipblaslt with c10::complex
@@ -230,6 +233,7 @@ class GemmTunableOp : public TunableOp<GemmParams<T>> {
         }
       }
     }
+#endif
 #endif
 
     this->RegisterOp(std::string("Default"), std::make_unique<DefaultGemmOp<T>>());
@@ -247,6 +251,7 @@ class GemmAndBiasTunableOp : public TunableOp<GemmAndBiasParams<T>> {
     this->RegisterOp(std::string("Default"), std::make_unique<DefaultGemmAndBiasOp<T>>());
 
 #ifdef USE_ROCM
+#ifdef USE_ROCM_HIPBLASLT
     static const auto env_hipblaslt = c10::utils::check_env("PYTORCH_TUNABLEOP_HIPBLASLT_ENABLED");
     if (!env_hipblaslt.has_value() || env_hipblaslt.value()) {
       // disallow tuning of hipblaslt with c10::complex
@@ -258,6 +263,7 @@ class GemmAndBiasTunableOp : public TunableOp<GemmAndBiasParams<T>> {
         }
       }
     }
+#endif
 #endif
 
     this->RegisterOp(std::string("Default"), std::make_unique<DefaultGemmAndBiasOp<T>>());
@@ -282,6 +288,7 @@ class GemmStridedBatchedTunableOp : public TunableOp<GemmStridedBatchedParams<T>
       }
     }
 
+#ifdef USE_ROCM_HIPBLASLT
     static const auto env_hipblaslt = c10::utils::check_env("PYTORCH_TUNABLEOP_HIPBLASLT_ENABLED");
     if (!env_hipblaslt.has_value() || env_hipblaslt.value()) {
       // disallow tuning of hipblaslt with c10::complex
@@ -293,6 +300,7 @@ class GemmStridedBatchedTunableOp : public TunableOp<GemmStridedBatchedParams<T>
         }
       }
     }
+#endif
 #endif
 
     this->RegisterOp(std::string("Default"), std::make_unique<DefaultGemmStridedBatchedOp<T>>());
@@ -310,9 +318,11 @@ class ScaledGemmTunableOp : public TunableOp<ScaledGemmParams<CT>> {
     this->RegisterOp(std::string("Default"), std::make_unique<DefaultScaledGemmOp<CT>>());
 
 #ifdef USE_ROCM
+#ifdef USE_ROCM_HIPBLASLT
     for (auto&& [name, op] : GetHipBlasLtScaledGemmTypeStringAndOps<AT, BT, CT, ALayout, BLayout>()) {
       this->RegisterOp(std::move(name), std::move(op));
     }
+#endif
 #endif
 
     this->RegisterOp(std::string("Default"), std::make_unique<DefaultScaledGemmOp<CT>>());

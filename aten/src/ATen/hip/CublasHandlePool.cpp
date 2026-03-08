@@ -33,7 +33,7 @@ namespace at::cuda {
 
 namespace {
 
-#if defined(USE_ROCM)
+#if defined(USE_ROCM) && defined(USE_ROCM_HIPBLASLT)
 void createCublasLtHandle(hipblasLtHandle_t *handle) {
   TORCH_CUDABLAS_CHECK(hipblasLtCreate(handle));
 }
@@ -389,7 +389,7 @@ hipblasHandle_t getCurrentCUDABlasHandle() {
 }
 
 hipblasLtHandle_t getCurrentCUDABlasLtHandle() {
-#ifdef USE_ROCM
+#if defined(USE_ROCM) && defined(USE_ROCM_HIPBLASLT)
   c10::DeviceIndex device = 0;
   AT_CUDA_CHECK(c10::cuda::GetDevice(&device));
 

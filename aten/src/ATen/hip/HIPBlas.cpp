@@ -17,7 +17,9 @@
 
 #ifdef USE_ROCM
 #include <c10/hip/HIPStream.h>
+#ifdef USE_ROCM_HIPBLASLT
 #include <hipblaslt/hipblaslt-ext.hpp>
+#endif
 // until hipblas has an API to accept flags, we must use rocblas here
 #include <hipblas/hipblas.h>
 #include <rocblas/rocblas.h>
@@ -286,6 +288,7 @@ namespace {
 // Defined here for now because this is the only place cublas_lt interface is
 // used but can be moved to a header once cublas_lt interface is used in
 // multiple places.
+#ifdef USE_ROCM_HIPBLASLT
 template <typename T, hipblasStatus_t (*destructor)(T*)>
 struct CuBlasLtDeleter {
   void operator()(T* x) {
@@ -363,9 +366,10 @@ class CuBlasLtMatmulPreference : public CuBlasLtDescriptor<
     TORCH_CUDABLAS_CHECK(::hipblasLtMatmulPreferenceSetAttribute(descriptor(), attr, &value, sizeof(T)));
   }
 };
+#endif
 } // namespace
 
-
+#ifdef USE_ROCM_HIPBLASLT
 template <typename Dtype, typename C_Dtype = Dtype>
 static inline bool bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(Dtype, C_Dtype)) {
 #if defined(USE_ROCM) && ROCM_VERSION == 60400
@@ -604,6 +608,12 @@ static inline bool bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(D
   }
   return true;
 }
+#else
+template <typename Dtype, typename C_Dtype = Dtype>
+static inline bool bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(Dtype, C_Dtype)) {
+  return false;
+}
+#endif
 
 
 template <typename Dtype, typename C_Dtype = Dtype>
@@ -1580,7 +1590,7 @@ bool gemm_and_bias(
     C_Dtype* result_ptr,
     int64_t result_ld,
     GEMMAndBiasActivationEpilogue activation) {
-
+#ifdef USE_ROCM_HIPBLASLT
   if (std::is_same_v<C_Dtype, float> && std::is_same_v<Dtype, at::BFloat16>) {
     #ifdef USE_ROCM
     TORCH_CHECK(false, "gemm input type at::BFloat16 and output type float is not supported for ROCm");
@@ -1794,6 +1804,9 @@ bool gemm_and_bias(
     return false;
   }
   return true;
+#else
+  return false;
+#endif
 }
 
 template bool gemm_and_bias(
@@ -1894,6 +1907,7 @@ template bool gemm_and_bias(
 
 using at::blas::ScalingType;
 
+#ifdef USE_ROCM_HIPBLASLT
 int get_scale_mode(ScalingType scaling_type, ScalarType scale_dtype, bool use_fast_accum) {
   switch (scaling_type) {
     case ScalingType::BlockWise1x32:
@@ -2359,6 +2373,55 @@ void int8_gemm(
   }
 #endif
 }
+#else
+void scaled_gemm(
+    char transa,
+    char transb,
+    int64_t m,
+    int64_t n,
+    int64_t k,
+    const void* mat1_ptr,
+    const void* mat1_scale_ptr,
+    int64_t mat1_ld,
+    ScalarType mat1_dtype,
+    ScalarType mat1_scale_dtype,
+    ScalingType mat1_scaling_type,
+    const void* mat2_ptr,
+    const void* mat2_scale_ptr,
+    int64_t mat2_ld,
+    ScalarType mat2_dtype,
+    ScalarType mat2_scale_dtype,
+    ScalingType mat2_scaling_type,
+    const void* bias_ptr,
+    ScalarType bias_dtype,
+    void* result_ptr,
+    const void* result_scale_ptr,
+    int64_t result_ld,
+    ScalarType result_dtype,
+    bool use_fast_accum,
+    const std::optional<Tensor>& alpha) {
+  TORCH_CHECK(
+      false,
+      "scaled_gemm requires hipBLASLt, but this ROCm build was configured with USE_ROCM_HIPBLASLT=OFF");
+}
+
+void int8_gemm(
+    bool transpose_mat1,
+    bool transpose_mat2,
+    int64_t m,
+    int64_t n,
+    int64_t k,
+    const int8_t* mat1_ptr,
+    int64_t mat1_ld,
+    const int8_t* mat2_ptr,
+    int64_t mat2_ld,
+    int32_t* result_ptr,
+    int64_t result_ld) {
+  TORCH_CHECK(
+      false,
+      "int8_gemm requires hipBLASLt, but this ROCm build was configured with USE_ROCM_HIPBLASLT=OFF");
+}
+#endif
 
 template <>
 void trsm<float>(CUDABLAS_TRSM_ARGTYPES(float)) {
