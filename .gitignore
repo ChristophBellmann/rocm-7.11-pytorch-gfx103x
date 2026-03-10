@@ -382,6 +382,9 @@ third_party/glog/
 .venv/
 venv/
 
+# Custom ROCm release workspace
+.rocm_release/
+
 # Log files
 *.log
 sweep/

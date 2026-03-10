@@ -150,6 +150,23 @@ No wrapper code needs to be written. You can see [a tutorial here](https://pytor
 Commands to install binaries via Conda or pip wheels are on our website: [https://pytorch.org/get-started/locally/](https://pytorch.org/get-started/locally/)
 
 
+## Custom ROCm 7.11 packaging for gfx103x
+
+This fork carries the packaging helpers for the custom ROCm 7.11 wheel family used on
+gfx103x systems. They live under:
+
+- `tools/rocm_release/README.md`
+- `tools/rocm_release/install_pytorch_rocm_wheel_to_opt.sh`
+- `tools/rocm_release/build_torchcodec_rocm_wheel.sh`
+- `tools/rocm_release/build_torchaudio_rocm_wheel.sh`
+- `tools/rocm_release/install_pytorch_rocm_wheel_to_venv.sh`
+
+That directory is the source of truth for:
+- promoting the custom `torch` wheel to `/opt/rocm/wheels/pytorch_rocm711/`
+- building ABI-matched `torchcodec` and `torchaudio` companion wheels
+- promoting those companion wheels to `/opt/rocm/wheels/pytorch_rocm711/`
+- installing the promoted wheel family into project venvs
+
 #### NVIDIA Jetson Platforms
 
 Python wheels for NVIDIA's Jetson Nano, Jetson TX1/TX2, Jetson Xavier NX/AGX, and Jetson AGX Orin are provided [here](https://forums.developer.nvidia.com/t/pytorch-for-jetson-version-1-10-now-available/72048) and the L4T container is published [here](https://catalog.ngc.nvidia.com/orgs/nvidia/containers/l4t-pytorch)
