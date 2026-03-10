@@ -1,6 +1,7 @@
 name: Check whether the workflow owner can use ARC runners
 
 on:
+  workflow_dispatch:
   workflow_call:
     inputs:
       check_experiments:

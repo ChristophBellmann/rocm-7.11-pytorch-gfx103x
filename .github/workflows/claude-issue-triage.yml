@@ -1,8 +1,6 @@
 name: Claude Issue Triage
 
 on:
-  issues:
-    types: [opened]
   workflow_dispatch:
     inputs:
       issue_number:

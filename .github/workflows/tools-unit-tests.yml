@@ -1,16 +1,7 @@
 name: test-scripts-and-ci-tools
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - scripts/lumen_cli/**
-      - .github/workflows/tools-unit-tests.yml
-  pull_request:
-    paths:
-      - scripts/lumen_cli/**
-      - .github/workflows/tools-unit-tests.yml
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}

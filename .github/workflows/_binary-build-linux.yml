@@ -1,6 +1,7 @@
 name: linux-binary-build
 
 on:
+  workflow_dispatch:
   workflow_call:
     inputs:
       build_name:
@@ -80,6 +81,7 @@ on:
       github-token:
         required: true
         description: Github Token
+
 
 permissions:
   id-token: write

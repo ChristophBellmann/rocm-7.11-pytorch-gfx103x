@@ -1,6 +1,7 @@
 name: linux-test
 
 on:
+  workflow_dispatch:
   workflow_call:
     inputs:
       build-environment:
@@ -85,6 +86,7 @@ on:
         required: false
         description: |
           FB app token to write to scribe endpoint
+
 
 env:
   GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}

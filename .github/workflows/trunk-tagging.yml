@@ -1,9 +1,6 @@
 name: trunk-tagging
 
 on:
-  push:
-    branches:
-      - main
   workflow_dispatch:
     inputs:
       commit_sha:

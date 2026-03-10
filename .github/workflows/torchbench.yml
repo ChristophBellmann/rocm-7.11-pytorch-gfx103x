@@ -1,9 +1,6 @@
 name: torchbench
 
 on:
-  push:
-    tags:
-      - ciflow/torchbench/*
   workflow_dispatch:
 
 concurrency:

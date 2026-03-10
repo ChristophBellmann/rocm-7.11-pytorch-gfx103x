@@ -1,9 +1,6 @@
 name: Mac MPS
 
 on:
-  push:
-    tags:
-      - ciflow/mps/*
   workflow_dispatch:
 
 concurrency:

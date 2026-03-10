@@ -1,6 +1,7 @@
 name: vllm-benchmark
 
 on:
+  workflow_dispatch:
   workflow_call:
     inputs:
       runner:

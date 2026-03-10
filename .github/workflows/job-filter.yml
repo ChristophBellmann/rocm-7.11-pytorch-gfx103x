@@ -23,6 +23,7 @@ name: job-filter
 #      if: ${{ github.repository_owner == 'pytorch' && (needs.job-filter.outputs.jobs == '' || contains(...)) }}
 
 on:
+  workflow_dispatch:
   workflow_call:
     inputs:
       jobs-to-include:

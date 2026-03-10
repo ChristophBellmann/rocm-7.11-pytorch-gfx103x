@@ -5,6 +5,7 @@
 name: xpu-test
 
 on:
+  workflow_dispatch:
   workflow_call:
     inputs:
       build-environment:
@@ -67,6 +68,7 @@ on:
         required: false
         description: |
           HF Auth token to avoid rate limits when downloading models or datasets from hub
+
 permissions:
   id-token: write
   contents: read

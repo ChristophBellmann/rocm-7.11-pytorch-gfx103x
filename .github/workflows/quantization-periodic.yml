@@ -1,13 +1,7 @@
 name: quantization-periodic
 
 on:
-  push:
-    tags:
-      - ciflow/quantization-periodic/*
   workflow_dispatch:
-  schedule:
-    # run weekly
-    - cron: "45 0 * * 0"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}

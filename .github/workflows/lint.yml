@@ -2,18 +2,8 @@ name: Lint
 # Workflow that runs lint checks and also unittests for tools, and scripts.
 
 on:
-  pull_request:
-    branches-ignore:
-      - nightly
-  push:
-    branches:
-      - main
-      - release/*
-      - landchecks/*
-    tags:
-      - ciflow/pull/*
-      - ciflow/trunk/*
   workflow_dispatch:
+
 
 permissions: read-all
 # The names of steps that actually test the code should be suffixed with `(nonretryable)`.

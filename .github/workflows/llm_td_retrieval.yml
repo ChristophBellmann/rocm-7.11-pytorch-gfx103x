@@ -1,7 +1,9 @@
 name: Retrieval PyTorch Tests for Target Determination
 
 on:
+  workflow_dispatch:
   workflow_call:
+
 
 permissions:
   id-token: write

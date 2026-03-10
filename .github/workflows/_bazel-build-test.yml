@@ -1,6 +1,7 @@
 name: bazel
 
 on:
+  workflow_dispatch:
   workflow_call:
     inputs:
       build-environment:
@@ -32,6 +33,7 @@ on:
         type: string
         default: "linux.large"
         description: Runner type
+
 
 env:
   GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}

@@ -1,11 +1,6 @@
 name: inductor-perf-nightly-xpu
 
 on:
-  push:
-    tags:
-      - ciflow/inductor-perf-test-nightly-xpu/*
-  schedule:
-    - cron: 30 17 * * *
   workflow_dispatch:
     inputs:
       training:

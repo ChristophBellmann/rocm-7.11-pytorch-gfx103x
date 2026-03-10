@@ -1,13 +1,7 @@
 name: Nitpicker
 
 on:
-  pull_request_target:
-    types: [opened, reopened]
-    branches: [main]
-
-  pull_request:
-    types: [opened, reopened]
-    branches: [gh/**/base]
+  workflow_dispatch:
 
 jobs:
   triage:

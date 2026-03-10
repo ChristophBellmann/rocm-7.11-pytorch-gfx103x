@@ -1,12 +1,6 @@
 name: vllm-test
 
 on:
-  push:
-    branches:
-      - main
-      - release/*
-    tags:
-      - ciflow/vllm/*
   workflow_dispatch:
 
 concurrency:

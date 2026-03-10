@@ -2,8 +2,6 @@ name: Index PyTorch Tests for Target Determination
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: '0 0 * * *'
 
 permissions:
   id-token: write

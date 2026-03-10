@@ -1,9 +1,7 @@
 name: Check mergeability of ghstack PR
 
 on:
-  pull_request:
-    types: [opened, synchronize, reopened]
-    branches: [gh/**/base]
+  workflow_dispatch:
 
 jobs:
   ghstack-mergeability-check:
@@ -79,7 +77,6 @@ jobs:
             echo "To debug, run the diagnostic workflow:"
             echo "https://github.com/pytorch/test-infra/actions/workflows/pr-dependencies-check.yml"
           } >> "$GITHUB_STEP_SUMMARY"
-
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}

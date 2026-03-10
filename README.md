@@ -2,6 +2,11 @@
 
 --------------------------------------------------------------------------------
 
+Note for this fork: GitHub Actions workflows are intentionally manual-only
+(`workflow_dispatch`) unless a file is also used as a reusable
+`workflow_call` building block. This avoids automatic CI noise on the personal
+gfx1031/ROCm branch.
+
 PyTorch is a Python package that provides two high-level features:
 - Tensor computation (like NumPy) with strong GPU acceleration
 - Deep neural networks built on a tape-based autograd system
