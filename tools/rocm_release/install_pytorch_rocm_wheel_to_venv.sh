@@ -2,9 +2,10 @@
 set -euo pipefail
 
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
-
 BUILD_DIR="${BUILD_DIR:-build}"
-WORKSPACE_DIR="${WORKSPACE_DIR:-${ROOT}/.rocm_release}"
+LEGACY_WORKSPACE_DIR="${WORKSPACE_DIR:-}"
+RELEASE_ROOT="${RELEASE_ROOT:-${LEGACY_WORKSPACE_DIR:-${ROOT}/.rocm_release}}"
+WORKSPACE_DIR="${RELEASE_ROOT}"
 ROCM_PREFIX="${ROCM_PREFIX:-/opt/rocm}"
 VENV_DIR="${VENV_DIR:-$HOME/.venvs/torch-rocm711}"
 WHEEL_PATH="${WHEEL_PATH:-}"

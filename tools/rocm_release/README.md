@@ -20,11 +20,17 @@ It should not own the packaging scripts.
 - `install_torchaudio_rocm_wheel_to_opt.sh`
 - `install_pytorch_rocm_wheel_to_venv.sh`
 
-Default local workspace:
+Default local release root:
 - `./.rocm_release/git/`
 - `./.rocm_release/wheels/pytorch_rocm711/`
 - `./.rocm_release/venvs/`
 - `./.rocm_release/install-backups/`
+
+Canonical override:
+- `RELEASE_ROOT=/path/to/release-state`
+
+Compatibility note:
+- `WORKSPACE_DIR` is still accepted as a legacy alias for `RELEASE_ROOT`.
 
 ## Typical flow
 

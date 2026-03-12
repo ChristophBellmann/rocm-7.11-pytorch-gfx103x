@@ -2,7 +2,9 @@
 set -euo pipefail
 
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
-WORKSPACE_DIR="${WORKSPACE_DIR:-${ROOT}/.rocm_release}"
+LEGACY_WORKSPACE_DIR="${WORKSPACE_DIR:-}"
+RELEASE_ROOT="${RELEASE_ROOT:-${LEGACY_WORKSPACE_DIR:-${ROOT}/.rocm_release}}"
+WORKSPACE_DIR="${RELEASE_ROOT}"
 SRC_DIR_PRIMARY="${SRC_DIR_PRIMARY:-${WORKSPACE_DIR}/wheels/pytorch_rocm711}"
 DEST_DIR="${DEST_DIR:-/opt/rocm/wheels/pytorch_rocm711}"
 TS="$(date +%Y%m%d_%H%M%S)"
