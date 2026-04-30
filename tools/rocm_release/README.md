@@ -1,18 +1,22 @@
-# ROCm 7.11 release helpers
+# ROCm 7.11 PyTorch release helpers
 
-This directory is the source of truth for the custom ROCm 7.11 packaging flow around this fork.
+This directory is the source of truth for the custom ROCm 7.11 packaging flow
+around this fork.
 
 Scope:
-- build the custom `torch` wheel from this repo
+- build/promote the custom `torch` wheel from this repo
 - build matching companion wheels for `torchcodec` and `torchaudio`
+- probe NumPy C-ABI compatibility before promotion
 - promote all three wheels to `/opt/rocm/wheels/pytorch_rocm711/`
-- install the promoted wheel family into project venvs with the required ROCm runtime environment
+- install the promoted wheel family into project venvs with the required ROCm
+  runtime environment
 
-TheRock validation should consume the promoted wheel family from `/opt/rocm` and validate runtime behavior.
-It should not own the packaging scripts.
+TheRock validation should consume the promoted wheel family from `/opt/rocm` and
+validate runtime behavior. It should not own the packaging scripts.
 
 ## Layout
 
+- `probe_numpy_abi.sh`
 - `build_torchcodec_rocm_wheel.sh`
 - `build_torchaudio_rocm_wheel.sh`
 - `install_pytorch_rocm_wheel_to_opt.sh`
@@ -32,42 +36,156 @@ Canonical override:
 Compatibility note:
 - `WORKSPACE_DIR` is still accepted as a legacy alias for `RELEASE_ROOT`.
 
-## Typical flow
+## NumPy ABI policy
 
-Build `torch` with the existing repo-native flow so that a wheel lands in `./dist/`.
-Then:
+The old promoted PyTorch wheel family used `numpy<2` as a runtime guard because
+native Python extensions that were built against the NumPy 1.x C-ABI can fail
+when imported with NumPy 2.x.
 
-```bash
-./tools/rocm_release/install_pytorch_rocm_wheel_to_opt.sh ./dist/torch-*.whl
-./tools/rocm_release/build_torchcodec_rocm_wheel.sh --rocm-prefix /opt/rocm
-./tools/rocm_release/install_torchcodec_rocm_wheel_to_opt.sh
-./tools/rocm_release/build_torchaudio_rocm_wheel.sh --rocm-prefix /opt/rocm
-./tools/rocm_release/install_torchaudio_rocm_wheel_to_opt.sh
+The intended forward path is now:
+
+```text
+new wheels: build/probe with NUMPY_SPEC='numpy>=2,<3'
+legacy repro: set NUMPY_SPEC='numpy<2'
 ```
 
-`install_pytorch_rocm_wheel_to_opt.sh` rewrites embedded RPATH/RUNPATH entries
-inside the `torch` wheel before promotion so the installed wheel no longer
-points back to an in-tree ROCm build directory such as
-`build-stage2/dist/rocm/lib`.
+Do not remove all `numpy<2` pins blindly. First rebuild the complete PyTorch
+wheel family, then probe it with NumPy 2, then promote it.
 
-That keeps the flow aligned with the other custom wheel families:
-- build and verify against the repo-local output first
-- promote a system-safe wheel into `/opt/rocm`
-- validate the promoted install separately against `/opt/rocm`
+## Probe the current promoted wheels
 
-Consumer projects can then install the promoted family with:
+This checks whether the currently promoted wheel family already imports with
+NumPy 2:
 
 ```bash
-./tools/rocm_release/install_pytorch_rocm_wheel_to_venv.sh --venv .venv --rocm-prefix /opt/rocm
+bash tools/rocm_release/probe_numpy_abi.sh \
+  --numpy-spec 'numpy>=2,<3' \
+  --rocm-prefix /opt/rocm
 ```
 
-Stable system aliases:
+With a GPU availability check:
+
+```bash
+bash tools/rocm_release/probe_numpy_abi.sh \
+  --numpy-spec 'numpy>=2,<3' \
+  --rocm-prefix /opt/rocm \
+  --require-gpu
+```
+
+Legacy comparison:
+
+```bash
+bash tools/rocm_release/probe_numpy_abi.sh \
+  --numpy-spec 'numpy<2' \
+  --rocm-prefix /opt/rocm
+```
+
+## NumPy 2 rebuild flow
+
+Build `torch` first with the repo-native PyTorch build flow so that a wheel lands
+in `./dist/`. The build environment should already contain NumPy 2 before
+`setup.py bdist_wheel` runs.
+
+Recommended build-env preflight:
+
+```bash
+python -m pip install -U pip setuptools wheel
+python -m pip install --force-reinstall 'numpy>=2,<3'
+python - <<'PY'
+import numpy as np
+print('build numpy:', np.__version__)
+PY
+```
+
+After the new `torch-*.whl` exists:
+
+```bash
+export NUMPY_SPEC='numpy>=2,<3'
+export ROCM_PREFIX=/opt/rocm
+
+bash tools/rocm_release/build_torchcodec_rocm_wheel.sh \
+  --torch-wheel ./dist/torch-*.whl \
+  --rocm-prefix "$ROCM_PREFIX" \
+  --numpy-spec "$NUMPY_SPEC"
+
+bash tools/rocm_release/build_torchaudio_rocm_wheel.sh \
+  --torch-wheel ./dist/torch-*.whl \
+  --rocm-prefix "$ROCM_PREFIX" \
+  --numpy-spec "$NUMPY_SPEC"
+```
+
+Probe the newly built local wheel family before promotion:
+
+```bash
+bash tools/rocm_release/probe_numpy_abi.sh \
+  --numpy-spec 'numpy>=2,<3' \
+  --wheel-dir .rocm_release/wheels/pytorch_rocm711 \
+  --torch-wheel ./dist/torch-*.whl \
+  --rocm-prefix /opt/rocm \
+  --require-gpu
+```
+
+Probe the same new wheels with NumPy 1.x only for compatibility information:
+
+```bash
+bash tools/rocm_release/probe_numpy_abi.sh \
+  --numpy-spec 'numpy<2' \
+  --wheel-dir .rocm_release/wheels/pytorch_rocm711 \
+  --torch-wheel ./dist/torch-*.whl \
+  --rocm-prefix /opt/rocm
+```
+
+## Promote after successful NumPy 2 probe
+
+```bash
+sudo bash tools/rocm_release/install_pytorch_rocm_wheel_to_opt.sh ./dist/torch-*.whl
+sudo bash tools/rocm_release/install_torchcodec_rocm_wheel_to_opt.sh
+sudo bash tools/rocm_release/install_torchaudio_rocm_wheel_to_opt.sh
+```
+
+Stable system aliases after promotion:
 - `/opt/rocm/wheels/pytorch_rocm711/torch-current.whl`
 - `/opt/rocm/wheels/pytorch_rocm711/torchcodec-current.whl`
 - `/opt/rocm/wheels/pytorch_rocm711/torchaudio-current.whl`
 
+Then probe the promoted state again:
+
+```bash
+bash tools/rocm_release/probe_numpy_abi.sh \
+  --numpy-spec 'numpy>=2,<3' \
+  --rocm-prefix /opt/rocm \
+  --require-gpu
+```
+
+## Consumer venv install
+
+After the NumPy 2 rebuild and successful promotion, consumers can use NumPy 2:
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install -U pip setuptools wheel
+python -m pip install 'numpy>=2,<3'
+python -m pip install --no-deps /opt/rocm/wheels/pytorch_rocm711/torch-current.whl
+python -m pip install --no-deps /opt/rocm/wheels/pytorch_rocm711/torchcodec-current.whl
+python -m pip install --no-deps /opt/rocm/wheels/pytorch_rocm711/torchaudio-current.whl
+```
+
+Or use the helper:
+
+```bash
+bash tools/rocm_release/install_pytorch_rocm_wheel_to_venv.sh \
+  --venv .venv \
+  --rocm-prefix /opt/rocm
+```
+
 ## Notes
 
-- These helpers assume a system ROCm install under `/opt/rocm` for the promoted/consumer path.
-- If `/opt/rocm` is not available yet, they can fall back to `<repo>/<build-dir>/dist/rocm` for local build verification.
-- The consuming venv should currently pin `numpy<2` until the custom wheel family is rebuilt for NumPy 2.x ABI compatibility.
+- These helpers assume a system ROCm install under `/opt/rocm` for the
+  promoted/consumer path.
+- If `/opt/rocm` is not available yet, they can fall back to
+  `<repo>/<build-dir>/dist/rocm` for local build verification.
+- Keep `NUMPY_SPEC='numpy<2'` only for old-wheel reproduction or bisecting.
+- Promote `torch`, `torchcodec`, and `torchaudio` as a matching family. Mixing
+  a new NumPy-2 `torch` wheel with old companion wheels can reintroduce ABI or
+  binary compatibility problems.
