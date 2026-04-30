@@ -22,8 +22,9 @@ usage() {
 Usage: probe_numpy_abi.sh [options]
 
 Creates a clean probe venv, installs the selected NumPy version and the custom
-ROCm PyTorch wheel family, then imports the native modules. The import probe is
-run from /tmp so a source checkout cannot shadow the installed torch wheel.
+ROCm PyTorch wheel family, then imports and exercises NumPy bridge operations.
+The probe is strict: NumPy initialization warnings or torch<->numpy conversion
+failures are treated as ABI failures.
 
 Options:
   --numpy-spec <spec>        NumPy requirement to probe (default: numpy>=2,<3)
@@ -162,15 +163,30 @@ export ROCM_NUMPY_ABI_EXPECT_TORCHAUDIO="$([[ -n "${torchaudio_wheel}" ]] && ech
   cd /tmp
   python - <<'PY'
 import os
+import warnings
 import numpy as np
+
+warnings.simplefilter("error", UserWarning)
 print("numpy      :", np.__version__)
 
-import torch
+try:
+    import torch
+except UserWarning as exc:
+    raise SystemExit(f"ERROR: torch emitted NumPy ABI warning during import: {exc}") from exc
+
 print("torch      :", getattr(torch, "__version__", ""))
 print("torch file :", getattr(torch, "__file__", ""))
 print("hip        :", getattr(torch.version, "hip", None))
 print("rocm       :", getattr(torch.version, "rocm", None))
 print("cuda_avail :", torch.cuda.is_available())
+
+try:
+    arr = np.arange(4, dtype=np.float32)
+    tensor = torch.from_numpy(arr)
+    back = tensor.numpy()
+    print("numpy bridge: OK", back.tolist())
+except Exception as exc:
+    raise SystemExit(f"ERROR: torch<->numpy bridge failed: {exc}") from exc
 
 if os.environ.get("ROCM_NUMPY_ABI_REQUIRE_GPU") == "1" and not torch.cuda.is_available():
     raise SystemExit("ERROR: torch.cuda.is_available() is false")
