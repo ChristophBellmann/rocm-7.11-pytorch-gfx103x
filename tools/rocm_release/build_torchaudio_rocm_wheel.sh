@@ -13,14 +13,18 @@ SRC_DIR="${SRC_DIR:-${WORKSPACE_DIR}/git/torchaudio}"
 WHEEL_DIR="${WHEEL_DIR:-${WORKSPACE_DIR}/wheels/pytorch_rocm711}"
 BUILD_VENV_DIR="${BUILD_VENV_DIR:-${WORKSPACE_DIR}/venvs/torchaudio}"
 BUILD_INFO_PATH="${BUILD_INFO_PATH:-${WHEEL_DIR}/TORCHAUDIO_BUILD_INFO.json}"
+NUMPY_SPEC="${NUMPY_SPEC:-numpy>=2,<3}"
 
 usage() {
   cat <<'USAGE'
 Usage: build_torchaudio_rocm_wheel.sh [options]
 
 Builds a torchaudio wheel against the promoted/current custom PyTorch wheel.
+The build venv installs NUMPY_SPEC before compiling native extensions so the
+resulting wheel follows the intended NumPy C-ABI policy.
 
 Defaults:
+  - NumPy ABI : NUMPY_SPEC='numpy>=2,<3'
   - torch wheel: /opt/rocm/wheels/pytorch_rocm711/torch-current.whl
                  else newest wheel in .rocm_release/wheels/pytorch_rocm711
                  else newest wheel in ./dist
@@ -37,6 +41,7 @@ Options:
   --src-dir <dir>       Source checkout dir
   --wheel-dir <dir>     Output wheel dir
   --build-venv <dir>    Build venv dir
+  --numpy-spec <spec>   NumPy requirement for build ABI (default: numpy>=2,<3)
   -h, --help            Show help
 USAGE
 }
@@ -116,6 +121,10 @@ while [[ $# -gt 0 ]]; do
       BUILD_VENV_DIR="${2:-}"
       shift 2
       ;;
+    --numpy-spec)
+      NUMPY_SPEC="${2:-}"
+      shift 2
+      ;;
     -h|--help)
       usage
       exit 0
@@ -143,6 +152,7 @@ rocm_use="$(choose_rocm_prefix)"
 echo "== torchaudio ROCm wheel build =="
 echo "torch wheel : ${TORCH_WHEEL_PATH}"
 echo "ROCm prefix : ${rocm_use}"
+echo "NumPy spec  : ${NUMPY_SPEC}"
 echo "ref         : ${TORCHAUDIO_REF}"
 echo "src dir     : ${SRC_DIR}"
 echo "wheel dir   : ${WHEEL_DIR}"
@@ -159,6 +169,7 @@ fi
 source "${BUILD_VENV_DIR}/bin/activate"
 
 python -m pip install -U pip setuptools wheel >/dev/null
+python -m pip install --force-reinstall "${NUMPY_SPEC}"
 python -m pip install -U typing-extensions filelock fsspec jinja2 networkx sympy >/dev/null
 python -m pip install --no-deps --force-reinstall "${TORCH_WHEEL_PATH}" >/dev/null
 
@@ -195,28 +206,31 @@ python -m pip install --no-deps --force-reinstall "${TORCHAUDIO_WHEEL}" >/dev/nu
 (
   cd /tmp
   python - <<'PY'
+import numpy as np
 import torch
 import torchaudio
 
-print("torch      :", torch.__version__)
-print("hip        :", getattr(torch.version, "hip", None))
-print("torchaudio :", torchaudio.__version__)
+print("numpy     :", np.__version__)
+print("torch     :", torch.__version__)
+print("hip       :", getattr(torch.version, "hip", None))
+print("torchaudio:", torchaudio.__version__)
 PY
 )
 
-python3 - <<'PY' "${BUILD_INFO_PATH}" "${TORCHAUDIO_WHEEL}" "${TORCHAUDIO_REF}" "${TORCH_WHEEL_PATH}" "${rocm_use}"
+python3 - <<'PY' "${BUILD_INFO_PATH}" "${TORCHAUDIO_WHEEL}" "${TORCHAUDIO_REF}" "${TORCH_WHEEL_PATH}" "${rocm_use}" "${NUMPY_SPEC}"
 import json
 import os
 import sys
 from datetime import datetime, timezone
 
-out_path, wheel_path, ref, torch_wheel, rocm_prefix = sys.argv[1:6]
+out_path, wheel_path, ref, torch_wheel, rocm_prefix, numpy_spec = sys.argv[1:7]
 payload = {
     "built_at_utc": datetime.now(timezone.utc).isoformat(),
     "torchaudio_wheel": os.path.basename(wheel_path),
     "torchaudio_ref": ref,
     "torch_wheel": os.path.basename(torch_wheel),
     "rocm_prefix": rocm_prefix,
+    "numpy_spec": numpy_spec,
 }
 with open(out_path, "w", encoding="utf-8") as f:
     json.dump(payload, f, indent=2, sort_keys=True)
