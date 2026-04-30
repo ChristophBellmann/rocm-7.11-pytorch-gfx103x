@@ -1,0 +1,522 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
+BUILD_DIR="${BUILD_DIR:-build}"
+LEGACY_WORKSPACE_DIR="${WORKSPACE_DIR:-}"
+RELEASE_ROOT="${RELEASE_ROOT:-${LEGACY_WORKSPACE_DIR:-${ROOT}/.rocm_release}}"
+WORKSPACE_DIR="${RELEASE_ROOT}"
+ROCM_PREFIX="${ROCM_PREFIX:-/opt/rocm}"
+VENV_DIR="${VENV_DIR:-$HOME/.venvs/torch-rocm711}"
+TORCH_WHEEL_PATH="${TORCH_WHEEL_PATH:-}"
+TORCHCODEC_WHEEL_PATH="${TORCHCODEC_WHEEL_PATH:-}"
+TORCHAUDIO_WHEEL_PATH="${TORCHAUDIO_WHEEL_PATH:-}"
+NUMPY_SPEC="${NUMPY_SPEC:-numpy>=2,<3}"
+CONSTRAINTS_PATH="${CONSTRAINTS_PATH:-}"
+ASSUME_YES=0
+DO_SMOKE=1
+INSTALL_TORCHCODEC=1
+INSTALL_TORCHAUDIO=1
+PATCH_STANDARD_ACTIVATE=1
+INSTALL_PACKAGES=()
+
+usage() {
+  cat <<'USAGE'
+Usage: create_rocm_venv.sh [options] [--install <pip-package> ...]
+
+Creates a deterministic ROCm/PyTorch venv for the custom ROCm 7.11 wheel family.
+It avoids install-order traps by:
+  - installing NumPy before the native custom wheels
+  - installing custom torch/torchaudio/torchcodec with --no-deps
+  - generating a constraints file that prevents pip from replacing custom wheels
+  - writing python-rocm and pip-rocm wrappers
+  - patching the normal venv activation script so ROCm loader env is active before Python starts
+
+Defaults:
+  - venv:   ~/.venvs/torch-rocm711
+  - NumPy:  NUMPY_SPEC='numpy>=2,<3'
+  - torch:  /opt/rocm/wheels/pytorch_rocm711/torch-current.whl if present,
+            else newest torch-*.whl from /opt/rocm, ./.rocm_release, or ./dist
+  - ROCm:   /opt/rocm if present, else <repo>/<build-dir>/dist/rocm
+
+Options:
+  --venv <dir>                  Venv dir
+  --numpy-spec <spec>           NumPy requirement (default: numpy>=2,<3)
+  --wheel <path>                Alias for --torch-wheel
+  --torch-wheel <path>          Explicit torch wheel
+  --torchcodec-wheel <path>     Explicit torchcodec wheel
+  --torchaudio-wheel <path>     Explicit torchaudio wheel
+  --rocm-prefix <dir>           ROCm prefix
+  --build-dir <dir>             In-tree ROCm fallback build dir
+  --constraints <path>          Constraints output path (default: <venv>/rocm711-constraints.txt)
+  --install <pip-package>       Install an app package through pip-rocm after the custom wheel family
+  --no-torchcodec               Skip torchcodec
+  --no-torchaudio               Skip torchaudio
+  --no-smoke                    Skip GPU smoke test
+  --no-activate-patch           Do not patch <venv>/bin/activate
+  -y, --yes                     Do not prompt
+  -h, --help                    Show help
+
+Examples:
+  create_rocm_venv.sh --venv .venv --rocm-prefix /opt/rocm -y
+  create_rocm_venv.sh --venv .venv --install openai-whisper -y
+  source .venv/bin/activate
+  pip-rocm install openai-whisper
+USAGE
+}
+
+confirm() {
+  local msg="$1"
+  if (( ASSUME_YES )); then
+    return 0
+  fi
+  read -r -p "${msg} [Y/n] " ans
+  case "${ans}" in
+    ""|Y|y|yes|YES) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+die() {
+  echo "ERROR: $*" >&2
+  exit 1
+}
+
+need_cmd() {
+  local exe="$1"
+  command -v "${exe}" >/dev/null 2>&1 || die "'${exe}' not found"
+}
+
+as_file_url() {
+  python3 - <<'PY' "$1"
+import pathlib
+import sys
+print(pathlib.Path(sys.argv[1]).resolve().as_uri())
+PY
+}
+
+latest_or_empty() {
+  local pattern="$1"
+  ls -1t ${pattern} 2>/dev/null | head -n 1 || true
+}
+
+choose_rocm_prefix() {
+  if [[ -d "${ROCM_PREFIX}" ]]; then
+    echo "${ROCM_PREFIX}"
+    return 0
+  fi
+  local fallback="${ROOT}/${BUILD_DIR}/dist/rocm"
+  if [[ -d "${fallback}" ]]; then
+    echo "${fallback}"
+    return 0
+  fi
+  die "ROCm prefix not found: '${ROCM_PREFIX}' and fallback missing: '${fallback}'"
+}
+
+resolve_wheel() {
+  local explicit="$1"
+  local current_name="$2"
+  local glob_name="$3"
+  local required="$4"
+
+  if [[ -n "${explicit}" ]]; then
+    [[ -f "${explicit}" ]] || die "Wheel not found: ${explicit}"
+    readlink -f "${explicit}"
+    return 0
+  fi
+
+  local found=""
+  if [[ -f "${ROCM_PREFIX}/wheels/pytorch_rocm711/${current_name}" ]]; then
+    readlink -f "${ROCM_PREFIX}/wheels/pytorch_rocm711/${current_name}"
+    return 0
+  fi
+  found="$(latest_or_empty "${ROCM_PREFIX}/wheels/pytorch_rocm711/${glob_name}")"
+  if [[ -n "${found}" ]]; then
+    readlink -f "${found}"
+    return 0
+  fi
+  found="$(latest_or_empty "${WORKSPACE_DIR}/wheels/pytorch_rocm711/${glob_name}")"
+  if [[ -n "${found}" ]]; then
+    readlink -f "${found}"
+    return 0
+  fi
+  found="$(latest_or_empty "${ROOT}/dist/${glob_name}")"
+  if [[ -n "${found}" ]]; then
+    readlink -f "${found}"
+    return 0
+  fi
+
+  if [[ "${required}" == "1" ]]; then
+    die "No ${glob_name} wheel found"
+  fi
+  return 1
+}
+
+write_constraints() {
+  local constraints_path="$1"
+  local torch_wheel="$2"
+  local torchcodec_wheel="$3"
+  local torchaudio_wheel="$4"
+  local numpy_spec="$5"
+
+  mkdir -p "$(dirname "${constraints_path}")"
+  {
+    echo "# Generated by tools/rocm_release/create_rocm_venv.sh"
+    echo "# Keep this file with the venv. Use pip-rocm for additional packages."
+    echo "${numpy_spec}"
+    echo "torch @ $(as_file_url "${torch_wheel}")"
+    if [[ -n "${torchcodec_wheel}" ]]; then
+      echo "torchcodec @ $(as_file_url "${torchcodec_wheel}")"
+    fi
+    if [[ -n "${torchaudio_wheel}" ]]; then
+      echo "torchaudio @ $(as_file_url "${torchaudio_wheel}")"
+    fi
+  } >"${constraints_path}"
+}
+
+write_rocm_runtime_wrappers() {
+  local venv_dir="$1"
+  local rocm_use="$2"
+  local constraints_path="$3"
+  local env_script="${venv_dir}/bin/rocm_pytorch_env.sh"
+  local activate_script="${venv_dir}/bin/activate_rocm_pytorch.sh"
+  local python_wrapper="${venv_dir}/bin/python-rocm"
+  local pip_wrapper="${venv_dir}/bin/pip-rocm"
+  local standard_activate="${venv_dir}/bin/activate"
+
+  cat >"${env_script}" <<'SCRIPT'
+#!/usr/bin/env bash
+# ROCm runtime environment for this venv. This file is sourced by
+# activate_rocm_pytorch.sh, python-rocm, pip-rocm and optionally bin/activate.
+
+export ROCM_PATH="__ROCM_USE__"
+export HIP_PATH="${HIP_PATH:-$ROCM_PATH}"
+export HSA_PATH="${HSA_PATH:-$ROCM_PATH}"
+export PATH="$ROCM_PATH/bin:$ROCM_PATH/llvm/bin:${PATH:-}"
+export LD_LIBRARY_PATH="$ROCM_PATH/lib:$ROCM_PATH/lib64:$ROCM_PATH/lib/llvm/lib:$ROCM_PATH/lib/host-math/lib:$ROCM_PATH/lib/rocm_sysdeps/lib:$ROCM_PATH/llvm/lib:${LD_LIBRARY_PATH:-}"
+if [[ -f "$ROCM_PATH/lib/llvm/lib/libomp.so" ]]; then
+  case ":${LD_PRELOAD:-}:" in
+    *":$ROCM_PATH/lib/llvm/lib/libomp.so:"*) ;;
+    *) export LD_PRELOAD="$ROCM_PATH/lib/llvm/lib/libomp.so${LD_PRELOAD:+:${LD_PRELOAD}}" ;;
+  esac
+fi
+export USE_ROCM_HIPBLASLT="${USE_ROCM_HIPBLASLT:-0}"
+if [[ -z "${HIP_DEVICE_LIB_PATH:-}" ]]; then
+  if [[ -d "$ROCM_PATH/lib/llvm/amdgcn/bitcode" ]]; then
+    export HIP_DEVICE_LIB_PATH="$ROCM_PATH/lib/llvm/amdgcn/bitcode"
+  elif [[ -d "$ROCM_PATH/amdgcn/bitcode" ]]; then
+    export HIP_DEVICE_LIB_PATH="$ROCM_PATH/amdgcn/bitcode"
+  fi
+fi
+export ROCM_PYTORCH_VENV_RUNTIME=1
+export ROCM_PYTORCH_CONSTRAINTS="__CONSTRAINTS_PATH__"
+SCRIPT
+  sed -i "s|__ROCM_USE__|${rocm_use}|g" "${env_script}"
+  sed -i "s|__CONSTRAINTS_PATH__|${constraints_path}|g" "${env_script}"
+  chmod +x "${env_script}"
+
+  cat >"${activate_script}" <<'SCRIPT'
+#!/usr/bin/env bash
+set -euo pipefail
+
+VENV_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=/dev/null
+source "$VENV_DIR/bin/activate"
+# shellcheck source=/dev/null
+source "$VENV_DIR/bin/rocm_pytorch_env.sh"
+SCRIPT
+  chmod +x "${activate_script}"
+
+  cat >"${python_wrapper}" <<'SCRIPT'
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=/dev/null
+source "${SCRIPT_DIR}/rocm_pytorch_env.sh"
+exec "${SCRIPT_DIR}/python" "$@"
+SCRIPT
+  chmod +x "${python_wrapper}"
+
+  cat >"${pip_wrapper}" <<'SCRIPT'
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=/dev/null
+source "${SCRIPT_DIR}/rocm_pytorch_env.sh"
+
+if [[ "${1:-}" == "install" ]]; then
+  shift
+  exec "${SCRIPT_DIR}/python" -m pip install -c "${ROCM_PYTORCH_CONSTRAINTS}" "$@"
+fi
+exec "${SCRIPT_DIR}/python" -m pip "$@"
+SCRIPT
+  chmod +x "${pip_wrapper}"
+
+  if (( PATCH_STANDARD_ACTIVATE )) && [[ -f "${standard_activate}" ]]; then
+    python3 - <<'PY' "${standard_activate}"
+from pathlib import Path
+import sys
+p = Path(sys.argv[1])
+text = p.read_text(encoding="utf-8")
+start = "# >>> ROCm PyTorch runtime >>>"
+end = "# <<< ROCm PyTorch runtime <<<"
+block = f"""\n{start}\nif [ -n \"${{VIRTUAL_ENV:-}}\" ] && [ -f \"$VIRTUAL_ENV/bin/rocm_pytorch_env.sh\" ]; then\n    . \"$VIRTUAL_ENV/bin/rocm_pytorch_env.sh\"\nfi\n{end}\n"""
+if start in text and end in text:
+    before, rest = text.split(start, 1)
+    _, after = rest.split(end, 1)
+    text = before.rstrip() + block + after.lstrip("\n")
+else:
+    text = text.rstrip() + block
+p.write_text(text, encoding="utf-8")
+PY
+  fi
+}
+
+run_smoke() {
+  local py="$1"
+  local expect_torchcodec="$2"
+  local expect_torchaudio="$3"
+  THEROCK_TORCHCODEC_EXPECTED="${expect_torchcodec}" \
+  THEROCK_TORCHAUDIO_EXPECTED="${expect_torchaudio}" \
+  "${py}" - <<'PY'
+import os
+import time
+import numpy as np
+import torch
+
+print(f"numpy                 : {np.__version__}")
+print(f"torch                 : {torch.__version__}")
+print(f"torch.version.rocm    : {torch.version.rocm}")
+print(f"torch.version.hip     : {torch.version.hip}")
+
+try:
+    import torchcodec
+    print(f"torchcodec            : {getattr(torchcodec, '__file__', 'unknown')}")
+except Exception as e:
+    if os.environ.get("THEROCK_TORCHCODEC_EXPECTED") == "1":
+        print(f"torchcodec            : import failed: {e!r}")
+        raise
+    print("torchcodec            : not installed")
+
+try:
+    import torchaudio
+    print(f"torchaudio            : {getattr(torchaudio, '__version__', 'unknown')}")
+except Exception as e:
+    if os.environ.get("THEROCK_TORCHAUDIO_EXPECTED") == "1":
+        print(f"torchaudio            : import failed: {e!r}")
+        raise
+    print("torchaudio            : not installed")
+
+ok = torch.cuda.is_available()
+print(f"torch.cuda.is_available: {ok}")
+if not ok:
+    raise SystemExit("ERROR: CUDA/HIP backend not available. Check /dev/kfd permissions and ROCm env.")
+
+print(f"device                : {torch.cuda.get_device_name(0)}")
+
+def find_loaded_hip_lib() -> str:
+    try:
+        with open("/proc/self/maps", "r", encoding="utf-8", errors="ignore") as f:
+            for line in f:
+                if "libamdhip64.so" in line:
+                    return line.split()[-1]
+    except Exception:
+        pass
+    return ""
+
+hip_lib = find_loaded_hip_lib()
+if hip_lib:
+    print(f"hip_lib               : {hip_lib}")
+
+dev = torch.device("cuda")
+dtype = torch.float16
+n = 2048
+iters = 20
+a = torch.randn((n, n), device=dev, dtype=dtype)
+b = torch.randn((n, n), device=dev, dtype=dtype)
+torch.cuda.synchronize()
+t0 = time.time()
+for _ in range(iters):
+    c = a @ b
+torch.cuda.synchronize()
+dt = time.time() - t0
+print(f"matmul fp16           : n={n} iters={iters} wall={dt:.3f}s it/s={iters/dt:.2f}")
+PY
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --venv)
+      VENV_DIR="${2:-}"
+      shift 2
+      ;;
+    --numpy-spec)
+      NUMPY_SPEC="${2:-}"
+      shift 2
+      ;;
+    --wheel|--torch-wheel)
+      TORCH_WHEEL_PATH="${2:-}"
+      shift 2
+      ;;
+    --torchcodec-wheel)
+      TORCHCODEC_WHEEL_PATH="${2:-}"
+      shift 2
+      ;;
+    --torchaudio-wheel)
+      TORCHAUDIO_WHEEL_PATH="${2:-}"
+      shift 2
+      ;;
+    --rocm-prefix)
+      ROCM_PREFIX="${2:-}"
+      shift 2
+      ;;
+    --build-dir)
+      BUILD_DIR="${2:-}"
+      shift 2
+      ;;
+    --constraints)
+      CONSTRAINTS_PATH="${2:-}"
+      shift 2
+      ;;
+    --install)
+      INSTALL_PACKAGES+=("${2:-}")
+      shift 2
+      ;;
+    --no-torchcodec)
+      INSTALL_TORCHCODEC=0
+      shift
+      ;;
+    --no-torchaudio)
+      INSTALL_TORCHAUDIO=0
+      shift
+      ;;
+    --no-smoke)
+      DO_SMOKE=0
+      shift
+      ;;
+    --no-activate-patch)
+      PATCH_STANDARD_ACTIVATE=0
+      shift
+      ;;
+    -y|--yes)
+      ASSUME_YES=1
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      die "Unknown arg: $1 (use --help)"
+      ;;
+  esac
+done
+
+need_cmd python3
+need_cmd readlink
+
+rocm_use="$(choose_rocm_prefix)"
+torch_wheel="$(resolve_wheel "${TORCH_WHEEL_PATH}" "torch-current.whl" "torch-*.whl" 1)"
+
+torchcodec_wheel=""
+if (( INSTALL_TORCHCODEC )); then
+  torchcodec_wheel="$(resolve_wheel "${TORCHCODEC_WHEEL_PATH}" "torchcodec-current.whl" "torchcodec-*.whl" 0 || true)"
+fi
+
+torchaudio_wheel=""
+if (( INSTALL_TORCHAUDIO )); then
+  torchaudio_wheel="$(resolve_wheel "${TORCHAUDIO_WHEEL_PATH}" "torchaudio-current.whl" "torchaudio-*.whl" 0 || true)"
+fi
+
+if [[ -z "${CONSTRAINTS_PATH}" ]]; then
+  CONSTRAINTS_PATH="${VENV_DIR}/rocm711-constraints.txt"
+fi
+
+cat <<EOF
+== ROCm PyTorch venv ==
+venv       : ${VENV_DIR}
+ROCm       : ${rocm_use}
+NumPy spec : ${NUMPY_SPEC}
+torch      : ${torch_wheel}
+torchcodec : ${torchcodec_wheel:-<not installed>}
+torchaudio : ${torchaudio_wheel:-<not installed>}
+constraints: ${CONSTRAINTS_PATH}
+patch activate: ${PATCH_STANDARD_ACTIVATE}
+EOF
+if ((${#INSTALL_PACKAGES[@]})); then
+  printf 'app packages: %s\n' "${INSTALL_PACKAGES[*]}"
+fi
+echo
+
+if ! confirm "Proceed with deterministic ROCm venv creation?"; then
+  echo "Aborted."
+  exit 0
+fi
+
+if [[ ! -x "${VENV_DIR}/bin/python" ]]; then
+  echo "==> creating venv"
+  mkdir -p "$(dirname "${VENV_DIR}")"
+  python3 -m venv "${VENV_DIR}"
+fi
+
+write_constraints "${CONSTRAINTS_PATH}" "${torch_wheel}" "${torchcodec_wheel}" "${torchaudio_wheel}" "${NUMPY_SPEC}"
+write_rocm_runtime_wrappers "${VENV_DIR}" "${rocm_use}" "${CONSTRAINTS_PATH}"
+
+PY="${VENV_DIR}/bin/python-rocm"
+PIP="${VENV_DIR}/bin/pip-rocm"
+
+echo "==> installing deterministic base packages"
+"${PY}" -m pip install -U pip setuptools wheel >/dev/null
+"${PY}" -m pip install --force-reinstall "${NUMPY_SPEC}"
+"${PY}" -m pip install -U typing-extensions filelock fsspec jinja2 networkx sympy packaging >/dev/null
+
+echo "==> installing custom torch wheel without dependency resolution"
+"${PY}" -m pip install --no-deps --force-reinstall "${torch_wheel}"
+
+if [[ -n "${torchcodec_wheel}" ]]; then
+  echo "==> installing custom torchcodec wheel without dependency resolution"
+  "${PY}" -m pip install --no-deps --force-reinstall "${torchcodec_wheel}"
+fi
+
+if [[ -n "${torchaudio_wheel}" ]]; then
+  echo "==> installing custom torchaudio wheel without dependency resolution"
+  "${PY}" -m pip install --no-deps --force-reinstall "${torchaudio_wheel}"
+fi
+
+if ((${#INSTALL_PACKAGES[@]})); then
+  echo "==> installing app packages through constraints"
+  "${PIP}" install "${INSTALL_PACKAGES[@]}"
+fi
+
+echo "==> pip check (non-fatal)"
+if ! "${PY}" -m pip check; then
+  echo "WARNING: pip check reported issues. The ROCm smoke test still determines runtime viability." >&2
+fi
+
+if (( DO_SMOKE )); then
+  echo "==> GPU smoke test"
+  expect_codec=0
+  expect_audio=0
+  [[ -n "${torchcodec_wheel}" ]] && expect_codec=1
+  [[ -n "${torchaudio_wheel}" ]] && expect_audio=1
+  run_smoke "${PY}" "${expect_codec}" "${expect_audio}"
+fi
+
+cat <<EOF
+
+Install complete.
+
+Supported entrypoints:
+  source "${VENV_DIR}/bin/activate"
+  python -c 'import torch; print(torch.cuda.is_available())'
+
+  "${VENV_DIR}/bin/python-rocm" -c 'import torch; print(torch.cuda.is_available())'
+
+For additional packages, use the constraint-aware wrapper:
+  "${VENV_DIR}/bin/pip-rocm" install openai-whisper
+
+Constraints file:
+  ${CONSTRAINTS_PATH}
+EOF
