@@ -22,16 +22,8 @@ usage() {
 Usage: probe_numpy_abi.sh [options]
 
 Creates a clean probe venv, installs the selected NumPy version and the custom
-ROCm PyTorch wheel family, then imports the native modules. This catches the
-NumPy 1.x/2.x C-ABI failure class before a wheel is promoted.
-
-Defaults:
-  - NumPy:      NUMPY_SPEC='numpy>=2,<3'
-  - ROCm:       /opt/rocm, fallback: <repo>/<build-dir>/dist/rocm
-  - wheel dir:  /opt/rocm/wheels/pytorch_rocm711 if present,
-                else .rocm_release/wheels/pytorch_rocm711
-  - torch:      torch-current.whl if present, else newest torch-*.whl
-  - companions: newest torchcodec-*.whl and torchaudio-*.whl if present
+ROCm PyTorch wheel family, then imports the native modules. The import probe is
+run from /tmp so a source checkout cannot shadow the installed torch wheel.
 
 Options:
   --numpy-spec <spec>        NumPy requirement to probe (default: numpy>=2,<3)
@@ -49,126 +41,55 @@ Options:
 USAGE
 }
 
-die() {
-  echo "ERROR: $*" >&2
-  exit 1
-}
-
-need_cmd() {
-  command -v "$1" >/dev/null 2>&1 || die "'$1' not found"
-}
+die() { echo "ERROR: $*" >&2; exit 1; }
+need_cmd() { command -v "$1" >/dev/null 2>&1 || die "'$1' not found"; }
 
 choose_rocm_prefix() {
-  if [[ -d "${ROCM_PREFIX}" ]]; then
-    echo "${ROCM_PREFIX}"
-    return 0
-  fi
+  if [[ -d "${ROCM_PREFIX}" ]]; then echo "${ROCM_PREFIX}"; return 0; fi
   local fallback="${ROOT}/${BUILD_DIR}/dist/rocm"
-  if [[ -d "${fallback}" ]]; then
-    echo "${fallback}"
-    return 0
-  fi
+  if [[ -d "${fallback}" ]]; then echo "${fallback}"; return 0; fi
   die "ROCm prefix not found: '${ROCM_PREFIX}' and fallback missing: '${fallback}'"
 }
 
 choose_wheel_dir() {
-  if [[ -n "${WHEEL_DIR}" ]]; then
-    echo "${WHEEL_DIR}"
-    return 0
-  fi
-  if [[ -d "${ROCM_PREFIX}/wheels/pytorch_rocm711" ]]; then
-    echo "${ROCM_PREFIX}/wheels/pytorch_rocm711"
-    return 0
-  fi
+  if [[ -n "${WHEEL_DIR}" ]]; then echo "${WHEEL_DIR}"; return 0; fi
+  if [[ -d "${ROCM_PREFIX}/wheels/pytorch_rocm711" ]]; then echo "${ROCM_PREFIX}/wheels/pytorch_rocm711"; return 0; fi
   echo "${WORKSPACE_DIR}/wheels/pytorch_rocm711"
 }
 
-latest_or_empty() {
-  local pattern="$1"
-  ls -1t ${pattern} 2>/dev/null | head -n 1 || true
-}
+latest_or_empty() { local pattern="$1"; ls -1t ${pattern} 2>/dev/null | head -n 1 || true; }
 
 resolve_wheel() {
-  local explicit="$1"
-  local dir="$2"
-  local current_name="$3"
-  local glob_name="$4"
+  local explicit="$1" dir="$2" current_name="$3" glob_name="$4"
   if [[ -n "${explicit}" ]]; then
     [[ -f "${explicit}" ]] || die "Wheel not found: ${explicit}"
     readlink -f "${explicit}"
     return 0
   fi
-  if [[ -f "${dir}/${current_name}" ]]; then
-    readlink -f "${dir}/${current_name}"
-    return 0
-  fi
+  if [[ -f "${dir}/${current_name}" ]]; then readlink -f "${dir}/${current_name}"; return 0; fi
   local found
   found="$(latest_or_empty "${dir}/${glob_name}")"
-  if [[ -n "${found}" ]]; then
-    readlink -f "${found}"
-    return 0
-  fi
+  if [[ -n "${found}" ]]; then readlink -f "${found}"; return 0; fi
   found="$(latest_or_empty "${ROOT}/dist/${glob_name}")"
-  if [[ -n "${found}" ]]; then
-    readlink -f "${found}"
-    return 0
-  fi
+  if [[ -n "${found}" ]]; then readlink -f "${found}"; return 0; fi
   return 1
 }
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --numpy-spec)
-      NUMPY_SPEC="${2:-}"
-      shift 2
-      ;;
-    --torch-wheel)
-      TORCH_WHEEL_PATH="${2:-}"
-      shift 2
-      ;;
-    --torchcodec-wheel)
-      TORCHCODEC_WHEEL_PATH="${2:-}"
-      shift 2
-      ;;
-    --torchaudio-wheel)
-      TORCHAUDIO_WHEEL_PATH="${2:-}"
-      shift 2
-      ;;
-    --wheel-dir)
-      WHEEL_DIR="${2:-}"
-      shift 2
-      ;;
-    --rocm-prefix)
-      ROCM_PREFIX="${2:-}"
-      shift 2
-      ;;
-    --build-dir)
-      BUILD_DIR="${2:-}"
-      shift 2
-      ;;
-    --venv)
-      VENV_DIR="${2:-}"
-      shift 2
-      ;;
-    --no-companions)
-      INSTALL_COMPANIONS=0
-      shift
-      ;;
-    --require-gpu)
-      REQUIRE_GPU=1
-      shift
-      ;;
-    --keep-venv)
-      KEEP_VENV=1
-      shift
-      ;;
-    -h|--help)
-      usage
-      exit 0
-      ;;
-    *)
-      die "Unknown arg: $1 (use --help)"
-      ;;
+    --numpy-spec) NUMPY_SPEC="${2:-}"; shift 2 ;;
+    --torch-wheel) TORCH_WHEEL_PATH="${2:-}"; shift 2 ;;
+    --torchcodec-wheel) TORCHCODEC_WHEEL_PATH="${2:-}"; shift 2 ;;
+    --torchaudio-wheel) TORCHAUDIO_WHEEL_PATH="${2:-}"; shift 2 ;;
+    --wheel-dir) WHEEL_DIR="${2:-}"; shift 2 ;;
+    --rocm-prefix) ROCM_PREFIX="${2:-}"; shift 2 ;;
+    --build-dir) BUILD_DIR="${2:-}"; shift 2 ;;
+    --venv) VENV_DIR="${2:-}"; shift 2 ;;
+    --no-companions) INSTALL_COMPANIONS=0; shift ;;
+    --require-gpu) REQUIRE_GPU=1; shift ;;
+    --keep-venv) KEEP_VENV=1; shift ;;
+    -h|--help) usage; exit 0 ;;
+    *) die "Unknown arg: $1 (use --help)" ;;
   esac
 done
 
@@ -193,9 +114,7 @@ if [[ -z "${VENV_DIR}" ]]; then
   created_tmp=1
 fi
 cleanup() {
-  if (( created_tmp )) && (( ! KEEP_VENV )); then
-    rm -rf "${VENV_DIR}"
-  fi
+  if (( created_tmp )) && (( ! KEEP_VENV )); then rm -rf "${VENV_DIR}"; fi
 }
 trap cleanup EXIT
 
@@ -232,26 +151,23 @@ python -m pip install -U pip setuptools wheel >/dev/null
 python -m pip install --force-reinstall "${NUMPY_SPEC}"
 python -m pip install -U typing-extensions filelock fsspec jinja2 networkx sympy >/dev/null
 python -m pip install --no-deps --force-reinstall "${torch_wheel}"
-if [[ -n "${torchcodec_wheel}" ]]; then
-  python -m pip install --no-deps --force-reinstall "${torchcodec_wheel}"
-fi
-if [[ -n "${torchaudio_wheel}" ]]; then
-  python -m pip install --no-deps --force-reinstall "${torchaudio_wheel}"
-fi
+if [[ -n "${torchcodec_wheel}" ]]; then python -m pip install --no-deps --force-reinstall "${torchcodec_wheel}"; fi
+if [[ -n "${torchaudio_wheel}" ]]; then python -m pip install --no-deps --force-reinstall "${torchaudio_wheel}"; fi
 
 export ROCM_NUMPY_ABI_REQUIRE_GPU="${REQUIRE_GPU}"
 export ROCM_NUMPY_ABI_EXPECT_TORCHCODEC="$([[ -n "${torchcodec_wheel}" ]] && echo 1 || echo 0)"
 export ROCM_NUMPY_ABI_EXPECT_TORCHAUDIO="$([[ -n "${torchaudio_wheel}" ]] && echo 1 || echo 0)"
 
-python - <<'PY'
+(
+  cd /tmp
+  python - <<'PY'
 import os
-import sys
-
 import numpy as np
 print("numpy      :", np.__version__)
 
 import torch
 print("torch      :", getattr(torch, "__version__", ""))
+print("torch file :", getattr(torch, "__file__", ""))
 print("hip        :", getattr(torch.version, "hip", None))
 print("rocm       :", getattr(torch.version, "rocm", None))
 print("cuda_avail :", torch.cuda.is_available())
@@ -269,3 +185,4 @@ if os.environ.get("ROCM_NUMPY_ABI_EXPECT_TORCHAUDIO") == "1":
 
 print("ABI probe  : OK")
 PY
+)
