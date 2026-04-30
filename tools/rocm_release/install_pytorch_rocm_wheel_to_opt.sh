@@ -170,6 +170,7 @@ restore_latest_backup() {
   echo "  from: ${latest}"
   echo "  to:   ${target}"
   "${SUDO[@]}" cp -f "${latest}" "${target}"
+  "${SUDO[@]}" chmod a+r "${target}"
   "${SUDO[@]}" ln -sfn "${wheel_name}" "${DEST_DIR}/torch-current.whl"
   "${SUDO[@]}" sha256sum "${target}"
   ls -lh "${target}"
@@ -233,6 +234,7 @@ if [[ -f "${DEST_WHEEL}" ]]; then
 fi
 
 "${SUDO[@]}" cp -f "${PATCHED_WHEEL}" "${DEST_WHEEL}"
+"${SUDO[@]}" chmod a+r "${DEST_WHEEL}"
 "${SUDO[@]}" ln -sfn "$(basename "${DEST_WHEEL}")" "${DEST_DIR}/torch-current.whl"
 
 echo
