@@ -218,7 +218,6 @@ bash tools/rocm_release/probe_numpy_abi.sh \
 - Promote `torch`, `torchcodec`, and `torchaudio` as a matching family. Mixing
   a new NumPy-2 `torch` wheel with old companion wheels can reintroduce ABI or
   binary compatibility problems.
-- The deeper remaining technical debt is `libomp`: the venv wrapper still
-  preloads `/opt/rocm/lib/llvm/lib/libomp.so` because current wheels can expose
-  unresolved `__kmpc_*` symbols. The wrapper makes this deterministic and
-  order-independent for users.
+- Promoted `torch` wheels are patched to declare ROCm runtime libraries as real
+  ELF dependencies. `libtorch_cpu.so` depends on `libomp.so` for `__kmpc_*`, and
+  `libtorch_hip.so` depends on `librocm_smi64.so.1` when it references RSMI.
